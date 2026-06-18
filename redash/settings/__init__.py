@@ -370,6 +370,7 @@ dynamic_settings = importlib.import_module(
 default_destinations = [
     "redash.destinations.email",
     "redash.destinations.slack",
+    "redash.destinations.slack_bot",
     "redash.destinations.webhook",
     "redash.destinations.discord",
     "redash.destinations.mattermost",
