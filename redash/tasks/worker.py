@@ -90,9 +90,30 @@ class HardLimitingWorker(BaseWorker):
     queue_class = RedashQueue
     job_class = CancellableJob
 
+    # Tracks the job we've already asked to stop gracefully, so the next monitoring pass
+    # can escalate to a force-kill if the work horse ignored the graceful signal.
+    _graceful_stop_sent_job_id = None
+
     def stop_executing_job(self, job):
-        os.kill(self.horse_pid, signal.SIGINT)
-        self.log.warning("Job %s has been cancelled.", job.id)
+        # When a user cancels a running job, monitor_work_horse calls this once per
+        # monitoring interval while the work horse is still alive. We escalate across
+        # those passes instead of force-killing immediately:
+        #
+        # 1. SIGINT triggers the work horse's signal handler, which raises
+        #    InterruptException so the query runner can cancel the query server-side
+        #    (e.g. issue a database KILL) rather than orphaning it.
+        # 2. If the horse ignored SIGINT (e.g. it is blocked inside a C extension) and is
+        #    still alive on the next pass, force-kill it so the job doesn't stay stuck in
+        #    the StartedJobRegistry. We mark it as deliberately stopped so the monitor
+        #    loop moves it to the FailedJobRegistry.
+        if self._graceful_stop_sent_job_id == job.id:
+            self.log.warning("Job %s did not stop after graceful cancel; killing the work horse.", job.id)
+            self._stopped_job_id = job.id
+            self.kill_horse()
+        else:
+            os.kill(self.horse_pid, signal.SIGINT)
+            self._graceful_stop_sent_job_id = job.id
+            self.log.warning("Job %s has been cancelled.", job.id)
 
     def soft_limit_exceeded(self, job):
         job_has_time_limit = job.timeout != -1
@@ -123,6 +144,9 @@ class HardLimitingWorker(BaseWorker):
             queue (Queue): _description_
         """
         self.monitor_started = utcnow()
+        # Reset per-job cancellation state so a new job always starts from the graceful
+        # SIGINT (mirrors how RQ resets its own _stopped_job_id between jobs).
+        self._graceful_stop_sent_job_id = None
         retpid = ret_val = rusage = None
         job.started_at = utcnow()
         while True:
