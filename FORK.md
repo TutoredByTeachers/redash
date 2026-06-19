@@ -38,6 +38,17 @@ drop it on the next version bump. **fork-only** = we carry it indefinitely.
    to confirm the delta is intact.
 5. Update this file (versions, statuses, drop any merged patches) and tag the image build.
 
+## Building & deploying
+
+The deployment image is built from this fork's source (so our patches and frontend assets
+are baked in) with a Doppler layer on top. See [`build/`](build/) — run `build/build.sh
+<dev|stage|prod> [tag]`. This supersedes the old `tbt-infra/redash/build` (which patched
+the official image). The ECS services and base infrastructure remain Terraform-managed in
+`tbt-infra/redash` (`deploy/` and `infra/`); they consume the image by tag — that tag is
+the contract between the two repos.
+
+`build/` is deploy-branch-only tooling; carry it forward on a version bump like the code patches.
+
 ## Patch tests
 
 ```
